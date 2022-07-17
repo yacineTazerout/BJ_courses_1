@@ -54,54 +54,202 @@
         var scene = null;
         var sceneToRender = null;
         var createDefaultEngine = function() { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true,  disableWebGL2Support: false}); };
-        var createScene = async function () {
-        
-            // This creates a basic Babylon Scene object (non-mesh)
-            var scene = new BABYLON.Scene(engine);
-        
-            // This creates and positions a free camera (non-mesh)
-            var camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 1, -5), scene);
-        
-            // This targets the camera to scene origin
-            camera.setTarget(BABYLON.Vector3.Zero());
-        
-            // This attaches the camera to the canvas
-            camera.attachControl(canvas, true);
-        
-            // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
-            var light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
-        
-            // Default intensity is 1. Let's dim the light a small amount
-            light.intensity = 0.7;
-        
-            var xr = await scene.createDefaultXRExperienceAsync({
-                uiOptions: {
-                    sessionMode: "immersive-ar",
-                },
-                optionalFeatures: true
+        var createScene = function () {
+    // This creates a basic Babylon Scene object (non-mesh)
+    var scene = new BABYLON.Scene(engine);
+    
+    // This creates and positions a free camera (non-mesh)
+    var camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 1.7, -0.3), scene);
+    camera.minZ = 0.01;
+
+    // This attaches the camera to the canvas
+    camera.attachControl(canvas, true); 
+
+    // This creates a light, aiming 0,1,0 - to the sky (non-mesh)
+    var light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+
+    // Default intensity is 1. Let's dim the light a small amount
+    light.intensity = 0.7; 
+
+    // Our built-in 'sphere' shape
+    var sphere = BABYLON.MeshBuilder.CreateSphere("sphere", {diameter: 0.3, segments: 32}, scene);
+    sphere.position = new BABYLON.Vector3(0, 1.7, 0.5);
+    var mat = new BABYLON.StandardMaterial("mat", scene);
+    sphere.material = mat;
+
+    var manager = new BABYLON.GUI.GUI3DManager();
+
+    scene.createDefaultXRExperienceAsync().then((xr) => {
+        xr.baseExperience.camera.position = new BABYLON.Vector3(0, 0, -0.3);
+        try {
+            xr.baseExperience.featuresManager.enableFeature(BABYLON.WebXRFeatureName.HAND_TRACKING, "latest", {xrInput: xr.input});
+        } catch (err) {
+            console.log("Articulated hand tracking not supported in this browser.");
+        }
+
+        manager.useRealisticScaling = true;
+
+        // Create buttons
+        // Text and Icon button
+        var touchHoloButton = new BABYLON.GUI.TouchHolographicButton("TouchHoloButton");
+        manager.addControl(touchHoloButton);
+        touchHoloButton.position = new BABYLON.Vector3(0.1, 1.8, 0);
+        touchHoloButton.text = "Alert Me";
+        touchHoloButton.imageUrl = "https://raw.githubusercontent.com/microsoft/MixedRealityToolkit-Unity/main/Assets/MRTK/SDK/StandardAssets/Textures/IconStar.png";
+        touchHoloButton.onPointerDownObservable.add(()=>{
+            alert("You've got mail")
+        });
+
+        // Text only button
+        var touchHoloTextButton = new BABYLON.GUI.TouchHolographicButton("TouchHoloTextButton");
+        manager.addControl(touchHoloTextButton);
+        touchHoloTextButton.position = new BABYLON.Vector3(0.05, 1.8, 0);
+        touchHoloTextButton.text = "Text Me";
+        touchHoloTextButton.onPointerDownObservable.add(()=>{
+            alert("I display texts")
+        });
+
+        // Icon only button
+        /* var touchHoloIconButton = new BABYLON.GUI.TouchHolographicButton("TouchHoloIconButton");
+        manager.addControl(touchHoloIconButton);
+        touchHoloIconButton.position = new BABYLON.Vector3(0.0, 1.8, 0);
+        touchHoloIconButton.icon = "https://raw.githubusercontent.com/microsoft/MixedRealityToolkit-Unity/main/Assets/MRTK/SDK/StandardAssets/Textures/IconStar.png";
+        touchHoloIconButton.onPointerDownObservable.add(()=>{
+            alert("I display icons")
+        }); */
+
+        // Create a custom button
+        BABYLON.SceneLoader.ImportMesh("", "https://david.blob.core.windows.net/babylonjs/MRTK/", "pushButton.glb", scene, function (newMeshes) {
+            var meshButton = new BABYLON.GUI.TouchMeshButton3D(newMeshes[0], "TouchMeshButton");
+            manager.addControl(meshButton);
+            meshButton.position = new BABYLON.Vector3(-0.1, 1.8, 0);
+            meshButton.node.addRotation(Math.PI, 0, 0);
+
+            var cylinder = newMeshes[0].getChildMeshes(false, (node) => { return node.name.indexOf("Cylinder") !== -1 })[0];
+
+            // Create a copy of the collision mesh with 0 visibility for the button, since we don't want the collision area to change when we push the button
+            var collisionMesh = cylinder.clone();
+            cylinder.isPickable = false;
+            collisionMesh.visibility = 0;
+            collisionMesh.setParent(newMeshes[0]);
+            meshButton.collisionMesh = collisionMesh;
+            meshButton.collidableFrontDirection = new BABYLON.Vector3(0, 0, -1);
+
+            var initialDepthWorld = cylinder.getAbsolutePosition().y;
+            var initialDepthLocal = cylinder.position.y;
+            var maxPressDepthLocal = 0.2;
+            var maxPressDepthWorld = maxPressDepthLocal * meshButton.scaling.x;
+            
+            // Set up the color transition
+            var fromColor = BABYLON.Color3.Green();
+            var toColor = BABYLON.Color3.Red();
+            cylinder.material.albedoColor = fromColor;
+
+            // make it work for far interactions as well
+            meshButton.pointerDownAnimation = () => {
+                if (!meshButton.isActiveNearInteraction) {
+                    cylinder.position.y = initialDepthLocal - maxPressDepthLocal;
+                    cylinder.material.albedoColor = toColor;
+                }
+            };
+            meshButton.pointerUpAnimation = () => {
+                cylinder.position.y = initialDepthLocal;
+                cylinder.material.albedoColor = fromColor;
+            };
+            meshButton.pointerEnterAnimation = () => {};
+            meshButton.pointerOutAnimation = () => {};
+
+            var minPressDepth = 1;
+            meshButton.onPointerDownObservable.add((position) => {
+                initialDepthWorld = cylinder.getAbsolutePosition().y;
+                maxDepthWorld = initialDepthWorld - maxPressDepthWorld;
+                minPressDepth = meshButton.getPressDepth(position);
             });
-        
-            const fm = xr.baseExperience.featuresManager;
-        
-            const xrTest = fm.enableFeature(BABYLON.WebXRHitTest, "latest");
-        
-            const marker = BABYLON.MeshBuilder.CreateTorus('marker', { diameter: 0.15, thickness: 0.05 });
-            marker.isVisible = false;
-            marker.rotationQuaternion = new BABYLON.Quaternion();
-        
-            xrTest.onHitTestResultObservable.add((results) => {
-                if (results.length) {
-                    marker.isVisible = true;
-                    hitTest = results[0];
-                    hitTest.transformationMatrix.decompose(marker.scaling, marker.rotationQuaternion, marker.position);
-                } else {
-                    marker.isVisible = false;
+
+            // Update the text panel with some debug info, update the button position/color
+            meshButton.onPointerMoveObservable.add((position) => {
+                if (meshButton.isActiveNearInteraction) {
+                    var pressDepth = meshButton.getPressDepth(position) - minPressDepth;
+                    var clampedNormPressDepth = Math.max(Math.min(pressDepth, maxPressDepthWorld), 0) / maxPressDepthWorld;
+                
+                    // Update the text and button visuals
+                    cylinder.position.y = initialDepthLocal - (clampedNormPressDepth * maxPressDepthLocal);
+
+                    // Update the color
+                    var scaledToColor = toColor.scale(clampedNormPressDepth);
+                    var scaledFromColor = fromColor.scale(1 - clampedNormPressDepth);
+                    cylinder.material.albedoColor = scaledToColor.add(scaledFromColor);
                 }
             });
+        });
         
-            return scene;
+        // Create Near Menu with Touch Holographic Buttons + behaviour
+        var nearMenu = new BABYLON.GUI.NearMenu("NearMenu");
+        nearMenu.rows = 3;
+        manager.addControl(nearMenu);
+        nearMenu.isPinned = true;
+        nearMenu.position.y = 1.61;
         
-        };
+        addNearMenuButtons(nearMenu, sphere);
+
+        // Create Hand Menu with Touch Holographic Buttons + behaviour
+        var handMenu = new BABYLON.GUI.HandMenu(xr.baseExperience, "HandMenu");
+        manager.addControl(handMenu);
+        
+        addHandMenuButtons(handMenu);
+
+    });
+
+    return scene;
+};
+
+var addNearMenuButtons = function(menu, target) {
+    var button1 = new BABYLON.GUI.TouchHolographicButton();
+    var button2 = new BABYLON.GUI.TouchHolographicButton();
+    var button3 = new BABYLON.GUI.TouchHolographicButton();
+    var button4 = new BABYLON.GUI.TouchHolographicButton();
+    var button5 = new BABYLON.GUI.TouchHolographicButton();
+    var button6 = new BABYLON.GUI.TouchHolographicButton();
+
+    menu.addButton(button1);
+    menu.addButton(button2);
+    menu.addButton(button3);
+    menu.addButton(button4);
+    menu.addButton(button5);
+    menu.addButton(button6);
+
+    button1.text = "Blue";
+    button2.text = "Red";
+    button3.text = "Green";
+    button4.text = "Purple";
+    button5.text = "Yellow";
+    button6.text = "Teal";
+
+    button1.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Blue()});
+    button2.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Red()});
+    button3.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Green()});
+    button4.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Purple()});
+    button5.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Yellow()});
+    button6.onPointerDownObservable.add(()=>{target.material.diffuseColor = BABYLON.Color3.Teal()});
+};
+
+var addHandMenuButtons = function (menu){
+    var button1 = new BABYLON.GUI.TouchHolographicButton();
+    var button2 = new BABYLON.GUI.TouchHolographicButton();
+    var button3 = new BABYLON.GUI.TouchHolographicButton();
+
+    menu.addButton(button1);
+    menu.addButton(button2);
+    menu.addButton(button3);
+
+    button1.text = "Refresh";
+    button1.imageUrl = "https://raw.githubusercontent.com/microsoft/MixedRealityToolkit-Unity/main/Assets/MRTK/SDK/StandardAssets/Textures/IconRefresh.png"
+    button2.text = "Message";
+    button2.imageUrl = "https://raw.githubusercontent.com/microsoft/MixedRealityToolkit-Unity/main/Assets/MRTK/SDK/StandardAssets/Textures/IconMessage.png"
+    button3.text = "Close";
+    button3.imageUrl = "https://raw.githubusercontent.com/microsoft/MixedRealityToolkit-Unity/main/Assets/MRTK/SDK/StandardAssets/Textures/IconClose.png"
+}
+
                 window.initFunction = async function() {
                     
                     
@@ -118,8 +266,7 @@
         if (!engine) throw 'engine should not be null.';
         startRenderLoop(engine, canvas);
         window.scene = createScene();};
-        initFunction().then(() => {scene.then(returnedScene => { sceneToRender = returnedScene; });
-                            
+        initFunction().then(() => {sceneToRender = scene                    
         });
 
         // Resize
